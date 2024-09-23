@@ -1,0 +1,360 @@
+---
+title: "Project_3"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_section: true
+date: "2023-11-18"
+---
+```{r setup, include=F}
+knitr::opts_chunk$set(echo = T, 
+                      include = T, 
+                      warning = F)
+```
+
+```{r, echo=F, message=F, warning=F}
+if (!require('dplyr')){
+  install.packages('dplyr')
+}
+if (!require('ggplot2')){
+  install.packages('ggplot2')
+}
+if (!require('gridExtra')){
+  install.packages('gridExtra')
+}
+if (!require('psych')){
+  install.packages('psych')
+}
+if (!require('car')){
+  install.packages('car')
+}
+if (!require('Hmisc')){
+  install.packages('Hmisc')
+}
+if (!require('multcomp')){
+  install.packages('multcomp')
+}
+if (!require('readxl')){
+  install.packages('readxl')
+}
+```
+
+Libraries used:
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(car)
+library(Hmisc)
+library(multcomp)
+library(gridExtra)
+library(gridExtra)
+library(readxl)
+theme_set(theme_bw())
+```
+
+# Introduction 
+
+The data used in this project was collected by 20 doctors. The objective is to determine how various factors (gender and type of medication) affect the duration of a person's stay in the hospital.
+
+# Data description
+##  Data preparation
+
+It is necessary to combine the data into a single file using a custom function that takes the directory path and the type of files to analyze as input.
+
+```{r, echo=F, message=F, warning=F}
+combine_data <- function(directory, extension = 'csv'){
+  # Named Vector with Functions for Reading Files of Various Extensions
+  functions <- c(csv = read.csv, 
+                 tsv = read.delim, 
+                 csv2 = read.csv2)
+  df <- data.frame()
+  for (file in list.files(directory)){
+    if (endsWith(file, suffix = extension)){
+      data <- functions[extension][[1]](paste0(directory, file))
+      df <- rbind(df, data)
+    }
+  }
+
+  # Sorts the combined data frame by the first column (which is often automatically generated
+  # Removes the first column from the data frame
+  df <- arrange(df, colnames(df)[1])[, -1]
+  
+  # Saving combined data in
+  if (!dir.exists(paste0(directory, 'full_out/'))){
+    dir.create(paste0(directory, 'full_out/'))
+  }
+  # Ensure the extension starts with a period
+  if (!startsWith(extension, ".")) {
+    extension <- paste0(".", extension)
+  }
+
+  # Write the file with the correct extension
+  write.csv(df, paste0(directory, 'full_out/whole_data', extension))
+  return(df)
+  
+}
+```
+
+```{r, echo=F, message=F, warning=F}
+drug_data <- combine_data('C:\\Users\\User\\Desktop\\BI_Stat\\3_project_anova\\Data\\')
+str(drug_data)
+dim(drug_data)
+```
+
+We can see that we have 200 observations and 6 variables, of which the most interest is in the target variable days_in_hospital and the two categorical variables gender and drug_type.
+
+Let's check the data for missing values:
+
+```{r, echo=F, message=F, warning=F}
+apply(apply(drug_data, 2, is.na), 2, sum)
+```
+We can see that there are 10 missing values in one variable, which indicates the presence of a relapse. I decided to replace all NA values with zeros, as most likely, if there was no relapse, the doctor might have simply forgotten to record its absence. Additionally, I don't want to remove 5% of the data with such a small number of observations.
+
+
+```{r, echo=F, message=F, warning=F}
+drug_data$is_relapse[is.na(drug_data$is_relapse)] <-  0
+```
+
+Let's also note that all variables are currently of string type. We will convert them into factors. Additionally, we'll check the unique values across different variables to avoid any strange observations that might be errors during data collection. This will not apply to the variable id, as it doesn't seem to carry any important information, at least at first glance.
+
+```{r}
+apply(drug_data[, -5], 2, unique)
+```
+We see several errors in the data collection process (such as "malle," 350 years old, age written in words, etc.). Let's correct them right away.
+
+```{r, echo=F, message=F, warning=F}
+drug_data$gender[drug_data$gender == 'malle'] <- 'male'
+drug_data$gender <- as.factor(drug_data$gender)
+drug_data$age[drug_data$age == 'thirty-one'] <- 31
+drug_data$age[drug_data$age == '350'] <- 35
+drug_data$age[drug_data$age == '220'] <- 22
+drug_data$age <- as.integer(drug_data$age)
+drug_data$drug_type <- as.factor(drug_data$drug_type)
+drug_data$is_relapse <- as.factor(drug_data$is_relapse)
+drug_data$days_in_hospital <- as.numeric(drug_data$days_in_hospital)
+```
+Let's also add a new variable called condition, which will be the result of concatenating the values of the gender and drug_type variables.
+
+```{r, echo=F, message=F, warning=F}
+drug_data$сondition <- as.factor(paste(drug_data$gender, drug_data$drug_type, sep = '_'))
+```
+It seems like we haven't broken anything, and the data looks good. We can proceed with the EDA.
+
+```{r, echo=F, message=F, warning=F}
+dim(drug_data)
+str(drug_data)
+head(drug_data)
+```
+
+
+##  EDA
+
+Let's create some plots to see how the variable days_in_hospital is distributed across different groups.
+It is evident that in this case, our groups do not have the same number of observations. This is not critical for us, as we plan to only investigate the groups defined by gender and type of medication.
+
+```{r, echo=F, message=F, warning=F}
+ggplot(drug_data, aes(drug_type, fill = is_relapse)) +
+  geom_bar() +
+  ggtitle('Distribution of Patients by Relapse and Medication Type') +
+  scale_fill_manual(values = c('0' = '#EBECB3',
+                               '1' = '#B3ECDD'),
+                    name = "Relapse", labels = c('No', 'Yes')) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  xlab('Medication Type') + 
+  ylab('Number of Patients')
+```
+
+Here we can see fully balanced groups. In this case, the analysis of variance (ANOVA) should behave well and be robust to some violations of assumptions if they arise.
+
+
+```{r, echo=F, message=F, warning=F}
+ggplot(drug_data, aes(drug_type, fill = gender)) +
+  geom_bar() +
+  ggtitle('Distribution of Patients by Gender and Medication Type') +
+  scale_fill_manual(values = c('female' = '#EBECB3',
+                               'male' = '#B3ECDD'),
+                    name = "Gender", labels = c('Female', 'Male')) + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  xlab('Medication Type') + 
+  ylab('Number of Patients')
+```
+These data already suggest that the medications may work differently depending on the patient's gender. To confirm this, we will need to perform a two-way ANOVA.
+
+```{r, echo=F, message=F, warning=F}
+ggplot(drug_data, aes(x = drug_type, y = days_in_hospital)) +
+  geom_boxplot(aes(fill = gender)) + 
+  scale_fill_manual(values = c('female' = '#EBECB3',
+                               'male' = '#B3ECDD'),
+                    name = "Gender", labels = c('Female', 'Male')) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  xlab('Medication Type') + 
+  ylab('Number of Days in Hospital') +
+  ggtitle('Distribution of Number of Days in Hospital by Gender and Medication Type')
+```
+
+
+# Analysis of variance
+## Model Building
+
+Let's build a linear model based on the factors gender and drug_type and conduct a two-way analysis of variance (ANOVA).
+
+```{r, echo=F, message=F, warning=F}
+hosp_duration_mod <- lm(days_in_hospital ~ gender + drug_type, data = drug_data)
+av_hosp_duration_mod <- Anova(mod = hosp_duration_mod)
+av_hosp_duration_mod
+```
+We can see that in the case of the model without interaction between the predictors, none of them significantly influence the dependent variable.
+
+## Checking Model Assumptions
+
+Let's check the assumptions of this model.
+
+```{r, echo=F, message=F, warning=F}
+mod_diag <- fortify(hosp_duration_mod)
+```
+
+The Cook's distance plot looks good. We can say that there are no influential observations.
+
+```{r, echo=F, message=F, warning=F}
+ggplot(mod_diag, aes(x = 1:nrow(mod_diag), y = .cooksd)) +
+  geom_bar(stat = 'identity') +
+  xlab('Observation Number') + 
+  ylab('Cook\'s Distance') +
+  ggtitle('Cook\'s Distance Plot') +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+The residual plots don't look very good. There are many observations beyond two standard deviations, and we also have non-uniform distribution of residuals across groups. We can also see that the variances across groups differ somewhat, but since the number of observations in the groups is equal, the ANOVA should be robust to this.
+
+
+```{r, echo=F, message=F, warning=F}
+ggplot(mod_diag, aes(x = drug_type, y = .stdresid)) +
+  geom_boxplot(aes(fill = gender)) + 
+  scale_fill_manual(values = c('female' = '#EBECB3',
+                               'male' = '#B3ECDD'),
+                    name = "Gender", labels = c('Female', 'Male')) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  xlab('Medication Type') + 
+  ylab('Standardized Residuals') +
+  ggtitle('Standardized Residuals by Gender and Medication Type')
+```
+```{r, echo=F, message=F, warning=F}
+ggplot(data = mod_diag, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0) +
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 2, color = "red") +
+  geom_hline(yintercept = -2, color = "red") +
+  xlab('Predicted Value') + 
+  ylab('Standardized Residuals') + 
+  ggtitle('Residuals vs Fitted Plot') + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+Overall, the residual distribution does not significantly deviate from normality.
+
+```{r, echo=F, message=F, warning=F}
+qqPlot(hosp_duration_mod)
+```
+
+
+```{r, echo=F, message=F, warning=F}
+shapiro.test(mod_diag$.resid)
+```
+## Model with Interaction of Predictors
+
+Based on the residual plots and the distribution of the number of days in the hospital depending on gender and medication, we can assume that something is missing in our model. It's time to try adding the interaction between the predictors.
+
+```{r, echo=F, message=F, warning=F}
+inter_model <- lm(days_in_hospital ~ gender * drug_type, data = drug_data)
+av_inter_model <- Anova(mod = inter_model)
+av_inter_model
+```
+We can see that the interaction between the predictors has a significant impact on the dependent variable.
+
+Let's perform diagnostics on the resulting model again.
+
+```{r, echo=F, message=F, warning=F}
+inter_mod_diag <- fortify(inter_model)
+```
+
+The Cook's distance plot still looks normal.
+
+```{r, echo=F, message=F, warning=F}
+ggplot(inter_mod_diag, aes(x = 1:nrow(mod_diag), y = .cooksd)) +
+  geom_bar(stat = 'identity') +
+  xlab('Observation Number') + 
+  ylab('Cook\'s Distance') +
+  ggtitle('Cook\'s Distance Plot') +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+However, the residuals plot has improved significantly: there are fewer observations beyond two standard deviations, and the residual distribution across the groups is approximately uniform.
+
+
+```{r, echo=F, message=F, warning=F}
+ggplot(inter_mod_diag, aes(x = drug_type, y = .stdresid)) +
+  geom_boxplot(aes(fill = gender)) + 
+  scale_fill_manual(values = c('female' = '#EBECB3',
+                               'male' = '#B3ECDD'),
+                    name = "Gender", labels = c('Female', 'Male')) +
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  xlab('Medication Type') + 
+  ylab('Standardized Residuals') +
+  ggtitle('Standardized Residuals by Gender and Medication Type (Model with Interaction)')
+
+```
+
+
+```{r, echo=F, message=F, warning=F}
+ggplot(data = inter_mod_diag, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0) +
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 2, color = "red") +
+  geom_hline(yintercept = -2, color = "red") +
+  xlab('Predicted Value') + 
+  ylab('Standardized Residuals') +
+  ggtitle('Residuals vs Fitted Plot (Model with Interaction)') + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+We can see that, generally, we cannot say that the residual distribution does not differ from normality, but in this case, it is not critical due to the robustness of ANOVA.
+
+```{r, echo=F, message=F, warning=F}
+shapiro.test(inter_mod_diag$.resid)
+```
+
+## Interpretation of Results
+
+
+```{r, echo=F, message=F, warning=F}
+av_inter_model
+```
+The interaction between the predictors turned out to be significant. The combination of factors such as gender and medication significantly affects the average number of days a person spends in the hospital (F = 24.3384, p_value ≈ 0, df1 = 3, df2 = 192).
+
+# Post-hoc tests
+
+ANOVA only tells us whether a factor has an overall effect, but it doesn’t specify which groups are different. To find this out, post-hoc tests need to be performed. Post-hoc tests are a series of pairwise comparisons of group means after a significant effect of the factor has been identified. They differ from ordinary pairwise comparisons in that they take into account the number of comparisons and the magnitude of the differences between the means.
+
+In this work, I will use Tukey's post-hoc test.
+
+```{r}
+summary(drug_data)
+```
+
+```{r, echo=F, message=F, warning=F}
+
+drug_data$condition <- as.factor(paste(drug_data$gender, drug_data$drug_type, sep = '_'))
+
+
+inter_fit <- lm(days_in_hospital ~ condition - 1, data = drug_data)
+
+
+res_tukey <- glht(inter_fit, linfct = mcp(condition = 'Tukey'))
+summary(res_tukey)
+
+```
+In this case, we see that differences were found between a large number of groups. The main results we can take away here are that the correct medication should be selected for the patient based on their gender to speed up recovery (in some cases, the wrong medication might even slow down the recovery process).
+
