@@ -1,0 +1,258 @@
+---
+title: "Project_1"
+output: html_document
+date: "2023-09-20"
+---
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+
+if (!require('dplyr')){
+  install.packages('dplyr')
+}
+if (!require('ggplot2')){
+  install.packages('ggplot2')
+}
+if (!require('gridExtra')){
+  install.packages('gridExtra')
+}
+```
+
+```{r setup_1, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data preparation
+
+Since the data is presented in multiple CSV files, for convenience in processing, we will write a function that combines them into a single table. The function takes one argument directory, which is the path to the folder where the necessary files are stored
+
+```{r}
+combine_files <- function(directory){
+  df <- data.frame()
+  for (file in list.files(path = "Data", pattern = "*.csv", full.names = TRUE)){
+    if (endsWith(file, suffix = '.csv')){
+      data <- read.csv(file)
+      df <- rbind(df, data)
+    }
+  }
+  return(df)
+}
+```
+
+Next, we will 1) load the data, 2) adjust the data types where necessary, and 3) remove missing values, as we do not have additional information to make reasonable assumptions about what these values might be. This approach to handling missing values is not the only one. Sometimes, NA values can be replaced with the mean (though this is not very accurate, as it's unclear on what basis this should be done). Another approach is to build a model that predicts missing values based on the available data, for example, predicting the length of a mollusk based on its diameter, age, and sex.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+directory <- 'C:\\Users\\User\\Desktop\\BI_Stat\\1_project_eda\\Data'
+
+# Call the function to combine all CSV files
+combined_data <- combine_files(directory)
+str(combined_data)
+```
+
+Since all our variables have numeric values, we will convert the variables Rings, Sex, Length, and Diameter to numeric.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+combined_data <- combined_data %>% mutate_all(as.numeric)
+colnames(combined_data)[2] <- "Sex"
+combined_data$Sex <- factor(combined_data$Sex, c(1, 2, 3), labels = c('Male', 'Female', 'Uvenile')) 
+combined_data <- na.omit(combined_data) # remove NAs
+```
+
+# EDA
+
+## Visualization of the variables for the presence of outliers
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+library(tidyr)
+long_data <- combined_data %>%
+  pivot_longer(cols = c(Length, Diameter, Height, Whole_weight, Shucked_weight, Viscera_weight, Shell_weight),
+               names_to = "Variable", values_to = "Value")
+
+# Box plot for all variables
+ggplot(long_data, aes(x = Variable, y = Value)) +
+  geom_boxplot() +
+  labs(title = "Boxplot for Multiple Variables", x = "Variable", y = "Value") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, fig.height=10, fig.width=12}
+rings <- ggplot(combined_data, aes(x = Sex, y = Rings))+
+  geom_violin(fill='#cc6600', alpha = 0.6)+
+  geom_boxplot(fill='#6f9bd1', alpha = 0.6)+
+  theme_classic()+
+  xlab('Sex')+
+  ylab('Rings')
+len <- ggplot(combined_data, aes(x = Sex, y = Length))+
+  geom_violin(fill='#cc6600', alpha = 0.6)+
+  geom_boxplot(fill='#6f9bd1', alpha = 0.6)+
+  theme_classic()+
+  xlab('Sex')+
+  ylab('Length')
+diam <- ggplot(combined_data, aes(x = Sex, y = Diameter))+
+  geom_violin(fill='#cc6600', alpha = 0.6)+
+  geom_boxplot(fill='#6f9bd1', alpha = 0.6)+
+  theme_classic()+
+  xlab('Sex')+
+  ylab('Diameter')
+height <- ggplot(combined_data, aes(x = Sex, y = Height))+
+  geom_violin(fill='#cc6600', alpha = 0.6)+
+  geom_boxplot(fill='#6f9bd1', alpha = 0.6)+
+  theme_classic()+
+  xlab('Sex')+
+  ylab('Height')
+ww <- ggplot(combined_data, aes(x = Sex, y = Whole_weight))+
+  geom_violin(fill='#cc6600', alpha = 0.6)+
+  geom_boxplot(fill='#6f9bd1', alpha = 0.6)+
+  theme_classic()+
+  xlab('Sex')+
+  ylab('Whole_weight')
+sw <- ggplot(combined_data, aes(x = Sex, y = Shucked_weight))+
+  geom_violin(fill='#cc6600', alpha = 0.6)+
+  geom_boxplot(fill='#6f9bd1', alpha = 0.6)+
+  theme_classic()+
+  xlab('Sex')+
+  ylab('Shucked_weight')
+vw <- ggplot(combined_data, aes(x = Sex, y = Viscera_weight))+
+  geom_violin(fill='#cc6600', alpha = 0.6)+
+  geom_boxplot(fill='#6f9bd1', alpha = 0.6)+
+  theme_classic()+
+  xlab('Sex')+
+  ylab('Viscera_weight')
+sw <- ggplot(combined_data, aes(x = Sex, y = Shell_weight))+
+  geom_violin(fill='#cc6600', alpha = 0.6)+
+  geom_boxplot(fill='#6f9bd1', alpha = 0.6)+
+  theme_classic()+
+  xlab('Sex')+
+  ylab('Shell_weight')
+grid.arrange(rings, len, diam, height, ww, sw, vw, sw, ncol=4)
+```
+
+The graphs show that almost all quantitative variables contain outliers. For further analysis I remove the outliers with the following function:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+outliers.rm <- function(x){    
+    q <- quantile(x, 0.25) + quantile(x, 0.75)    
+    return(abs(x - q/2) <= 2*IQR(x))}
+combined_data_without_outliers <- combined_data %>% filter(if_all(-Sex, outliers.rm))
+```
+
+## Assessing the Relationship Between Variables
+
+The graph shows a positive relationship between the quantitative variables.
+
+```{r, echo=FALSE, fig.align='center'}
+pairs(select(combined_data_without_outliers, -Sex))
+```
+
+Based on the conducted EDA, the following hypotheses can be formulated:
+
+1.  The height of juvenile mollusks is smaller than that of adults;
+2.  Male mollusks have more rings than female mollusks;
+3.  There is a linear relationship between the diameter and weight of the mollusk.
+
+# Further data analysis
+
+The mean and standard deviation of the variable "Length" for mollusks of different sexes:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+combined_data_without_outliers %>% 
+  group_by(Sex) %>%
+  summarize(
+    mean_length = round(mean(Length), 2), 
+    sd_length = round(sd(Length), 2)
+  )
+
+```
+
+The percentage of mollusks that have a Height value that does not exceed 0.165 is `r round(sum(combined_data_without_outliers$Height <= 0.165) /length(combined_data_without_outliers$Height) * 100, 2)`%.
+
+The value of the variable Length that is greater than 92% of all observations is `r as.numeric(quantile(combined_data_without_outliers$Length, 0.92, na.rm = TRUE))`
+
+Then I created a new variable Length_z_scores and stored the standardized values of the variable Length in it.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+combined_data_without_outliers <- combined_data_without_outliers %>%
+  mutate(Length_z_scores = (Length - mean(Length) / sd(Length)))
+```
+
+### Comparison of mollusk diameter with 5 and 15 rings:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(filter(combined_data_without_outliers, Rings == 5 | Rings == 15), aes(x = factor(Rings), y = Diameter))+
+  geom_boxplot(fill='#dedb85', alpha=0.6)+
+  theme_classic()+
+  xlab('Number of Rings')+
+  ylab('Diameter')
+```
+
+
+From this graph, it is evident that the diameter of mollusks with 15 rings is larger than that of mollusks with 5 rings.
+
+Next, we will test the hypothesis of equality of means between these two groups using the Student's t-test. I will not perform a normality check in this case, as with more than 30 observations, the t-test can be applied to data that are not normally distributed (in our case, the number of observations is significantly larger than 30).
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+stat <- t.test(combined_data_without_outliers$Diameter[combined_data_without_outliers == 5], combined_data_without_outliers$Diameter[combined_data_without_outliers == 15])
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Function to print p-value
+man_print <- function(x){
+  if (x < 0.001){
+    return('p-value << 0.05')
+  }
+  else {
+    return(paste('p-value =', as.character(x)))
+  }
+}
+```
+
+
+The t-statistic was `r round(stat$statistic, 2)`, and also `r man_print(stat$p.value)` with the number of observations being `r length(combined_data_without_outliers$Diameter[combined_data_without_outliers == 5])` and `r length(combined_data_without_outliers$Diameter[combined_data_without_outliers == 15])` in the samples of mollusks with 5 and 15 rings, respectively. Therefore, we can conclude that there are significant differences in the diameters of mollusks with 5 and 15 rings.
+
+
+### Relationship between the variables Diameter and Whole_weight
+
+
+First, we will test the normality of the distribution of these variables using the Shapiro-Wilk test.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+shapiro.test(combined_data_without_outliers$Diameter)
+shapiro.test(combined_data_without_outliers$Whole_weight)
+```
+It is evident that the distributions of these variables significantly differ from the normal distribution. Therefore, to assess the relationship between these variables, we will calculate the Spearman correlation coefficient
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+cor.test(combined_data_without_outliers$Diameter, combined_data_without_outliers$Whole_weight, method = "spearman")
+```
+These data indicate a strong relationship between the studied variables.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+combined_data_without_outliers %>% ggplot(aes(x = Diameter, y = Whole_weight))+
+  geom_point(aes(col = Sex))+
+  geom_smooth()+
+  theme_classic()+
+  ylab('Weight')+
+  xlab('Diameter')
+```
+From the graph, it is clear that for diameter values less than 0.4, the linear relationship breaks down. In my opinion, this relationship could be described as a power function.
+
+
+### How old is the mussel?
+
+First, let's check if there are significant differences in the age composition between male and female individuals. For this, we will use the Wilcoxon test, as we cannot say that the variable Rings is continuous (it is more of a rank).
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+wilcox.test(filter(combined_data_without_outliers, Sex == 'Male')$Rings, filter(combined_data_without_outliers, Sex == 'Female')$Rings)
+```
+It is evident that male and female groups significantly differ in age composition. Next, I used the Wilcoxon test again, but this time with a one-sided hypothesis, and it turned out that on average, the age of male individuals is lower than that of females.
+
+Overall, the age of mollusks ranges from 4 to 15 rings. The most represented group consists of individuals with 9 rings. There are 29 of the youngest individuals and 102 of the oldest ones, but it is probably not possible to conclude that older individuals dominate the population, as the histogram below shows that the distribution is somewhat skewed toward younger individuals.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(combined_data_without_outliers, aes(Rings))+
+  geom_histogram(binwidth = 0.5, fill = 'lightblue')+
+  xlab('Number of Rings')+
+  ylab('Number of Individuals')
+```
