@@ -1,0 +1,375 @@
+---
+title: "Project_2"
+output:
+  html_document:
+    toc: true          
+    toc_float: true     
+    toc_depth: 3        
+date: "2023-10-22"
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r, echo=F, message=FALSE, warning=FALSE}
+
+if (!require('dplyr')){
+  install.packages('dplyr')
+}
+if (!require('ggplot2')){
+  install.packages('ggplot2')
+}
+if (!require('gridExtra')){
+  install.packages('gridExtra')
+}
+if (!require('MASS')){
+  install.packages("MASS")
+}
+
+if (!require('car')){
+  install.packages("car")
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The MASS package contains data on housing values in the city of Boston
+from the 1970s to the 1980s (data frame **Boston**). We are very
+interested in looking at how **the median home value (variable medv,
+measured in thousands of dollars) depends on various factors.**
+
+The goal is to build a complete linear model, after standardizing the
+predictors. Interactions between the predictors do not need to be
+considered in the model.
+
+Perform diagnostics of the model: a. Check the linearity of the
+relationships b. Check for influential observations c. Check the
+independence of observations d. Check for normality of the distribution
+and homoscedasticity (constant variance)
+
+Create a prediction plot of home prices based on the variable with the
+largest coefficient by absolute value.
+
+# 1 Data description
+
+```{r, message=FALSE, warning=FALSE}
+library(MASS)
+df <- as.data.frame(Boston)
+str(df)
+```
+
+This data frame contains the following columns:
+
+-   **crim** per capita crime rate by town.
+
+-   **zn** proportion of residential land zoned for lots over 25,000
+    sq.ft.
+
+-   **indus** proportion of non-retail business acres per town.
+
+-   **chas** Charles River dummy variable (= 1 if tract bounds river; 0
+    otherwise).
+
+-   **nox** nitrogen oxides concentration (parts per 10 million).
+
+-   **rm** average number of rooms per dwelling.
+
+-   **age** proportion of owner-occupied units built prior to 1940.
+
+-   **dis** weighted mean of distances to five Boston employment
+    centres.
+
+-   **rad** index of accessibility to radial highways.
+
+-   **tax** full-value property-tax rate per \$10,000.
+
+-   **ptratio** pupil-teacher ratio by town.
+
+-   **black** proportion of blacks by town
+
+-   **lstat** lower status of the population (percent).
+
+-   **medv** median value of owner-occupied homes in \$1000s.
+
+# 2 Building the Complete Linear Model
+
+First, we will standardize the variables. At this initial stage, we will
+not consider the interaction between the predictors.
+
+```{r, message=FALSE, warning=FALSE}
+df_standartized <-  as.data.frame(sapply(df[-4], scale))
+df_standartized$chas <- as.factor(df$chas)
+df_standartized$chas <-  relevel(df_standartized$chas, ref = '0')
+```
+
+Now let's build a model:
+
+```{r,message=FALSE, warning=FALSE}
+full_model <- lm(medv ~ ., data = df_standartized)
+summary(full_model)
+```
+
+# 3 Model Diagnostics
+
+## 3.1 Check for normality of the distribution and homoscedasticity (constant variance)
+
+```{r,message=FALSE, warning=FALSE}
+qqPlot(residuals(full_model), main = "QQ-Plot with Outliers Identified", ylab = 'Quantiles of the residuals distribution')
+```
+
+The quantile plot does not look very good; it cannot be said that the
+standardized residuals are normally distributed.
+
+## 3.2 Check the independence of observations
+
+If we look at the structure of the dataset, we can notice the presence
+of correlations between the predictors. Therefore, checking for
+multicollinearity is especially relevant in this case.
+
+One way to check the model for multicollinearity of the predictors is to
+use VIF (Variance Inflation Factor).
+
+If a predictor has a VIF value greater than 2, it should be excluded
+from the model.
+
+If there are several such predictors, a stepwise algorithm is applied:
+calculate the VIF, remove the predictor with the highest VIF,
+recalculate the VIF for the updated model, and repeat until all values
+are below the threshold.
+
+```{r,message=FALSE, warning=FALSE}
+vif(full_model)
+```
+
+In this case, we can easily observe the presence of multicollinearity in
+our model. Some predictors will need to be removed from the model in
+further steps.
+
+## 3.3 Check the linearity of relationships
+
+The residuals distribution plot does not look very good. A fairly large
+number of observations are beyond two standard deviations, and a clear
+pattern is visible in the residuals. All of this indicates the presence
+of nonlinearity in the relationship as well as heteroscedasticity
+(non-constant variance).
+
+```{r,message=FALSE, warning=FALSE}
+gg_resid <- ggplot(data = full_model, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0) +
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 2, color = "blue") +
+  geom_hline(yintercept = -2, color = "blue") +
+  xlab('Predicted Value') + 
+  ylab('Model Residuals')
+gg_resid
+```
+
+## 3.4 Check for influential observations
+
+```{r,message=FALSE, warning=FALSE}
+cooksd <- cooks.distance(full_model)
+
+# Create a data frame for plotting
+mod_full_diag <- data.frame(observation = 1:length(cooksd), cooksd = cooksd)
+
+# Plot Cook's distances using ggplot
+ggplot(mod_full_diag, aes(x = observation, y = cooksd)) + 
+  geom_bar(stat = "identity") + 
+  geom_hline(yintercept = 2, color = "blue") +
+  xlab('Number of observation') + 
+  ylab('Cook\'s Distance')
+```
+
+None of the values exceed the conventional threshold of 2 units. There
+are no influential observations.
+
+# 4 Model Predictions
+
+We will plot the predicted values of house prices based on the variable
+with the largest absolute coefficient. In this case, it is the variable
+lstat.
+
+We cannot account for the variability of all predictors at once.
+Therefore, we usually choose one that interests us the most (in our
+case, lstat). Based on this, a test dataset is created, where the target
+predictor takes values from the minimum to the maximum, while all other
+predictors are represented by their mean values.
+
+```{r,message=FALSE, warning=FALSE}
+test_data <- data.frame(
+  lstat = seq(min(df_standartized$lstat), max(df_standartized$lstat), length.out = 90),
+  crim = rep(mean(df_standartized$crim), 90),
+  zn = rep(mean(df_standartized$zn), 90),
+  indus = rep(mean(df_standartized$indus), 90),
+  nox = rep(mean(df_standartized$nox), 90),
+  rm = rep(mean(df_standartized$rm), 90),
+  age = rep(mean(df_standartized$age), 90),
+  dis = rep(mean(df_standartized$dis), 90),
+  rad = rep(mean(df_standartized$rad), 90),
+  tax = rep(mean(df_standartized$tax), 90),
+  ptratio = rep(mean(df_standartized$ptratio), 90),
+  black = rep(mean(df_standartized$black), 90),
+  chas = rep('0', 90)  # assuming 'chas' is a categorical variable
+)
+
+Predictions <- predict(full_model, newdata = test_data, interval = 'confidence')
+MyData <- data.frame(test_data, Predictions)
+
+Pl_predict <- ggplot(MyData, aes(x = lstat, y = fit)) +
+  geom_ribbon(alpha = 0.2, aes(ymin = lwr, ymax = upr)) +
+  geom_line() + 
+  ggtitle("Multiple Linear Model Predictions") +
+  xlab('Percentage of Lower Status Population (lstat)') + 
+  ylab('Predicted House Price')
+Pl_predict
+```
+
+# 5 Additional Section
+
+Let’s return to our full model and recall the results of the
+multicollinearity check.
+
+```{r,message=FALSE, warning=FALSE}
+vif(full_model)
+```
+
+We will iteratively remove one predictor with the highest VIF from the
+model until all values are below the threshold (2).
+
+```{r,message=FALSE, warning=FALSE}
+mod2 <- update(full_model, .~. - tax)
+#vif(mod2)
+
+mod3 <- update(mod2, .~. - nox)
+#vif(mod3)
+
+mod4 <- update(mod3, .~. - dis)
+#vif(mod4)
+
+mod5 <- update(mod4, .~. - lstat)
+#vif(mod5)
+
+mod6 <- update(mod5, .~. - nox)
+#vif(mod6)
+
+mod7 <- update(mod6, .~. - rad)
+#vif(mod7)
+
+mod_good <- update(mod7, .~. - indus)
+vif(mod_good)
+```
+
+The final model at this stage
+
+When the categorical variable chas equals 0: 
+medv = -7.06 - 0.11 * crim - 0.003 * zn + 7.06 * rm - 0.04 * age - 0.93 * ptratio + 0.015 * black
+
+When the categorical variable chas equals 1: 
+medv = -3.54 - 0.11 * crim - 0.003 * zn + 7.06 * rm - 0.04 * age - 0.93 * ptratio + 0.015 * black
+
+## Step 1: Finding the Optimal Model
+
+We can leave the model in this form, or we can try to retain only the
+predictors that significantly affect the house prices (a large number of
+predictors usually leads to overfitting).
+
+### 5.1.1 Stepwise Selection of Predictors by Significance
+
+In this work, I will use the backward selection (also known as backward
+elimination) algorithm for predictor selection. As a selection
+criterion, I will use the partial F-test.
+
+```{r}
+drop1(mod_good , test = 'F')
+```
+
+```{r,message=FALSE, warning=FALSE}
+mod_good_unstd <- update(mod_good, .~. - zn)
+drop1(mod_good_unstd, test = 'F')
+```
+
+Thus, we kept only the predictors with a significant influence on the
+dependent variable ( **crim**, **rm**, **age**, **ptratio**, **black**,
+**chas**.
+
+```{r,message=FALSE, warning=FALSE}
+summary(mod_good_unstd)
+```
+
+### 5.1.2 Model Diagnostics
+
+We have already looked at several plots to diagnose our model, but for
+multiple regression models, it is also necessary to create plots for
+predictors that were excluded from the model. In our case, it is evident
+that there are no unaccounted dependencies in the model overall, so we
+do not need to return the predictors that were removed in previous
+stages of the analysis.
+
+```{r,message=FALSE, warning=FALSE}
+res1 <- gg_resid + aes(x = zn)
+res2 <- gg_resid + aes(x = indus)
+res3 <- gg_resid + aes(x = nox)
+res4 <- gg_resid + aes(x = dis)
+res5 <- gg_resid + aes(x = rad)
+res6 <- gg_resid + aes(x = tax)
+res7 <- gg_resid + aes(x = lstat)
+grid.arrange(res1, res2, res3, res4, res5, res6, res7, nrow = 4)
+```
+
+```{r,message=FALSE, warning=FALSE}
+gg_resid <- ggplot(data = mod_good_unstd, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = 2, color = "red") +
+  geom_hline(yintercept = -2, color = "red") +
+  xlab('Predicted Value') + 
+  ylab('Standardized Residuals')
+
+gg_resid
+```
+
+```{r,message=FALSE, warning=FALSE}
+qqPlot(residuals(mod_good_unstd), xlab = 'Quantiles of Normal Distribution', ylab = 'Quantiles of Residuals Distribution')
+```
+The analysis showed that if any issues were corrected, it wasn't very effective. The model is far from perfect. In this case, some transformation of variables might have helped (though this is often undesirable as it complicates the interpretation of results), or the use of other statistical methods, which will likely be discussed in future projects. Additionally, attempts to account for interactions between variables within the final model did not lead to success; in fact, the Cook's distance plot became worse (not shown here). At a first approximation, we can try to predict which aspects need improvement to maximize the price of a house.
+
+## 5.2 Customer recomendations
+
+Finall model is:
+
+When the categorical variable chas = 0:
+medv = -7.06 - 0.11 * crim + 7.05 * rm - 0.04 * age - 0.92 * ptratio + 0.015 * black
+
+When the categorical variable chas = 1:
+medv = -3.54 - 0.11 * crim + 7.05 * rm - 0.04 * age - 0.92 * ptratio + 0.015 * black
+
+We can see 6 parameters that, in one way or another, influence house
+prices. Here are some insights that, in my opinion, should help maximize
+the price of a house for sale:
+
+-   Properties bordering the river are, on average, priced $3.52K
+    higher.
+-   A decrease in the per capita crime rate by one unit increases the
+    house price by \$0.11K.
+-   On average, each additional room increases the house price by $7.05K.
+-   Reducing the proportion of residential houses built before 1940 by
+    one unit increases the house price by \$0.04K. This parameter could
+    be completely disregarded if building a brand-new neighborhood.
+-   Reducing the pupil-to-teacher ratio in the city increases the house
+    price by $0.92K.
+-   The parameter black reflects the proportion of the Black population in the city, but it's unlikely to     be influenced, so no recommendations will be provided regarding this.
+
+Thus, in the ideal neighborhood:
+
+-   Properties border a river.
+-   Low crime rate.
+-   A large number of rooms in houses (up to 8 in this case, as the data
+    does not show higher values).
+-   It would be ideal if the number of students per class were minimal,
+    for example, three.
+-   The approximate house price under these conditions could be $50.1K.
+
